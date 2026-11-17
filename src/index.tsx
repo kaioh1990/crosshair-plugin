@@ -1,5 +1,6 @@
 import {
   ButtonItem,
+  DropdownItem,
   PanelSection,
   PanelSectionRow,
   staticClasses,
@@ -8,187 +9,141 @@ import { callable, definePlugin } from "@decky/api";
 import { useState, useEffect } from "react";
 import { FaCrosshairs } from "react-icons/fa";
 
-// Existing Python methods
-const make800pCrosshair = callable<[], void>("make_800p_crosshair");
-const make1080pCrosshair = callable<[], void>("make_1080p_crosshair");
-const make2160pCrosshair = callable<[], void>("make_2160p_crosshair");
-const make800pDotCrosshair = callable<[], void>("make_800p_dot_crosshair");
-const make1080pDotCrosshair = callable<[], void>("make_1080p_dot_crosshair");
-const make2160pDotCrosshair = callable<[], void>("make_2160p_dot_crosshair");
+interface ScreenInfo {
+  mode: string; // "auto" or "WIDTHxHEIGHT"
+  detected: string; // detected resolution, e.g. "1280x800"
+  target: string; // resolution actually used for centering
+}
+
+const makeCenteredCrosshair = callable<[style: string], void>("make_centered_crosshair");
+const recenterCrosshair = callable<[], void>("recenter_crosshair");
+const setResolutionMode = callable<[mode: string], void>("set_resolution_mode");
+const getScreenInfo = callable<[], ScreenInfo>("get_screen_info");
 const adjustCrosshairOffset = callable<[number, number], void>("adjust_crosshair_offset");
 const getCurrentOffsets = callable<[], number[]>("get_current_offsets");
 const removeCrosshair = callable<[], void>("remove_crosshair");
+
+const RESOLUTION_OPTIONS = [
+  { data: "auto", label: "Auto-detect" },
+  { data: "2560x1600", label: "2560 x 1600 (ROG Flow Z13)" },
+  { data: "1920x1200", label: "1920 x 1200 (ROG Flow Z13 FHD)" },
+  { data: "1920x1080", label: "1920 x 1080 (TV / monitor)" },
+  { data: "1280x800", label: "1280 x 800 (Steam Deck)" },
+];
+
+const STEP_OPTIONS = [1, 5, 10, 50].map((n) => ({ data: n, label: `${n} px` }));
 
 function Content() {
   const [status, setStatus] = useState("No action yet");
   const [xOffset, setXOffset] = useState(0);
   const [yOffset, setYOffset] = useState(0);
+  const [screen, setScreen] = useState<ScreenInfo | null>(null);
+  const [step, setStep] = useState(5);
 
-  const fetchOffsets = async () => {
+  const refresh = async () => {
     try {
       const [x, y] = await getCurrentOffsets();
       setXOffset(x);
       setYOffset(y);
+      setScreen(await getScreenInfo());
     } catch (error) {
       console.error(error);
     }
   };
 
-  const on800pClick = async () => {
+  const run = async (action: () => Promise<unknown>, ok: string, fail: string) => {
     try {
-      await make800pCrosshair();
-      setStatus("Crosshair Box (800p) applied!");
-      await fetchOffsets();
+      await action();
+      setStatus(ok);
+      await refresh();
     } catch (error) {
       console.error(error);
-      setStatus("Failed to apply 800p crosshair.");
-    }
-  };
-
-  const on1080pClick = async () => {
-    try {
-      await make1080pCrosshair();
-      setStatus("Crosshair Box for 1080p applied!");
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to apply 1080p crosshair.");
-    }
-  };
-
-   const on2160pClick = async () => {
-    try {
-      await make2160pCrosshair();
-      setStatus("Crosshair Box for 2160p applied!");
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to apply 2160p crosshair.");
-    }
-  };
-
-  const on800pDotClick = async () => {
-    try {
-      await make800pDotCrosshair();
-      setStatus("Crosshair Dot (800p) applied!");
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to apply 800p dot crosshair.");
-    }
-  };
-
-  const on1080pDotClick = async () => {
-    try {
-      await make1080pDotCrosshair();
-      setStatus("Crosshair Dot for 1080p applied!");
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to apply 1080p dot crosshair.");
-    }
-  };
-
-  const on2160pDotClick = async () => {
-    try {
-      await make2160pDotCrosshair();
-      setStatus("Crosshair Dot for 2160p applied!");
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to apply 2160p dot crosshair.");
-    }
-  };
-
-  const onRemoveClick = async () => {
-    try {
-      await removeCrosshair();
-      setStatus("Crosshair removed!");
-      setXOffset(0);
-      setYOffset(0);
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to remove crosshair.");
-    }
-  };
-
-  const onOffsetClick = async (xDelta: number, yDelta: number) => {
-    try {
-      await adjustCrosshairOffset(xDelta, yDelta);
-      setStatus(`Crosshair offset adjusted by x=${xDelta}, y=${yDelta}`);
-      await fetchOffsets();
-    } catch (error) {
-      console.error(error);
-      setStatus("Failed to adjust crosshair offset.");
+      setStatus(fail);
     }
   };
 
   useEffect(() => {
-    fetchOffsets();
+    refresh();
   }, []);
 
   return (
     <PanelSection title="Crosshair Plugin">
       <PanelSectionRow>
-        <div>
-          NOTE: This plugin works by replacing the performance overlay with text that acts as a crosshair in your game. Currently you can not have both a performance overlay and crosshairs at the same time. To restore performance overlay, simply toggle one of the 4 levels from the QAM tab. 
+        <div style={{ fontSize: "12px" }}>
+          This plugin replaces the performance overlay with a crosshair. To restore the performance overlay, toggle
+          one of its levels in the QAM performance tab.
         </div>
       </PanelSectionRow>
+
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on800pClick}>
-          Make Crosshair Box (800p)
+        <DropdownItem
+          label="Screen resolution"
+          description={screen ? `Detected: ${screen.detected.replace("x", " x ")}` : undefined}
+          rgOptions={RESOLUTION_OPTIONS}
+          selectedOption={screen?.mode ?? "auto"}
+          onChange={(opt) =>
+            run(() => setResolutionMode(opt.data), `Screen set to ${opt.label}`, "Failed to set screen resolution.")
+          }
+        />
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={() => run(() => makeCenteredCrosshair("box"), "Centered box crosshair applied!", "Failed to apply crosshair.")}
+        >
+          Centered Crosshair Box
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on800pDotClick}>
-          Make Crosshair Dot (800p)
+        <ButtonItem
+          layout="below"
+          onClick={() => run(() => makeCenteredCrosshair("dot"), "Centered dot crosshair applied!", "Failed to apply crosshair.")}
+        >
+          Centered Crosshair Dot
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on1080pClick}>
-          Make Crosshair Box (1080p)
+        <ButtonItem layout="below" onClick={() => run(recenterCrosshair, "Crosshair re-centered.", "Failed to re-center crosshair.")}>
+          Re-center
         </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on1080pDotClick}>
-          Make Crosshair Dot (1080p)
-        </ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on2160pClick}>
-          Make Crosshair Box (2160p)
-        </ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem layout="below" onClick={on2160pDotClick}>
-          Make Crosshair Dot (2160p)
-        </ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem layout="below" onClick={onRemoveClick}>
+        <ButtonItem layout="below" onClick={() => run(removeCrosshair, "Crosshair removed!", "Failed to remove crosshair.")}>
           Remove Crosshair
         </ButtonItem>
       </PanelSectionRow>
+
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={() => onOffsetClick(0, -1)}>
+        <DropdownItem
+          label="Nudge step"
+          rgOptions={STEP_OPTIONS}
+          selectedOption={step}
+          onChange={(opt) => setStep(opt.data)}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => run(() => adjustCrosshairOffset(0, -step), `Moved up ${step}px`, "Failed to move.")}>
           Up
         </ButtonItem>
-        <ButtonItem layout="below" onClick={() => onOffsetClick(-1, 0)}>
+        <ButtonItem layout="below" onClick={() => run(() => adjustCrosshairOffset(-step, 0), `Moved left ${step}px`, "Failed to move.")}>
           Left
         </ButtonItem>
-        <ButtonItem layout="below" onClick={() => onOffsetClick(1, 0)}>
+        <ButtonItem layout="below" onClick={() => run(() => adjustCrosshairOffset(step, 0), `Moved right ${step}px`, "Failed to move.")}>
           Right
         </ButtonItem>
-        <ButtonItem layout="below" onClick={() => onOffsetClick(0, 1)}>
+        <ButtonItem layout="below" onClick={() => run(() => adjustCrosshairOffset(0, step), `Moved down ${step}px`, "Failed to move.")}>
           Down
         </ButtonItem>
       </PanelSectionRow>
+
       <PanelSectionRow>
         <div>Status: {status}</div>
       </PanelSectionRow>
       <PanelSectionRow>
         <div>
           Current Offsets: X = {xOffset}, Y = {yOffset}
+          {screen ? ` (screen ${screen.target.replace("x", " x ")})` : ""}
         </div>
       </PanelSectionRow>
     </PanelSection>
